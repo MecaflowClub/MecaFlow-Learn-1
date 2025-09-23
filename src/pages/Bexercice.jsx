@@ -273,7 +273,40 @@ export default function BeginnerExercise() {
         topology: cadResult.topology,
       };
 
-      if (isDXF) {
+      // Check if this is an assembly validation response
+      const isAssemblyResponse = cadResult && cadResult.num_components && Array.isArray(cadResult.components_match);
+
+      if (isAssemblyResponse) {
+        // Assembly validation results
+        cadResults = [
+          {
+            label: "Component Count",
+            status: cadResult.num_components.ok ? "success" : "fail",
+            message: cadResult.num_components.message,
+            actual: cadResult.num_components.submitted,
+            expected: cadResult.num_components.reference
+          },
+          ...cadResult.components_match.map((comp, idx) => ({
+            label: `Component ${idx + 1}`,
+            isComponent: true,
+            volume: comp.volume_ok,
+            volumeScore: comp.volume_score,
+            centerOfMass: {
+              ok: comp.center_of_mass_ok,
+              submitted: comp.center_of_mass_sub,
+              reference: comp.center_of_mass_ref
+            },
+            topology: comp.topology_match
+          }))
+        ];
+
+        statusMessage = cadResult.success 
+          ? "Assembly validation successful!"
+          : "Assembly validation failed. Please check component details.";
+        
+        allowNext = cadResult.success || (typeof score === 'number' && score >= 80);
+
+      } else if (isDXF) {
         // extract entity counts & bounding box & matches
         const entityCounts = extractDXFEntityCounts(cadResult) || {};
         const boundingBox = extractBoundingBox(cadResult);
@@ -381,20 +414,35 @@ export default function BeginnerExercise() {
           rawCadResult: cadResult,
         };
       } else {
-        // Non-DXF: reuse previous logic, show the cadChecks mapping
+        // Non-DXF and Non-Assembly: show appropriate validation based on file type
         const hidePrincipalMoments =
           ["68c4831609f681ae64cc4e5c", "68c4831609f681ae64cc4e5f"].includes(
             exercise._id
           );
 
-        const cadChecks = [
-          { key: "volume", label: "Volume" },
-          { key: "topology", label: "Topology" },
-          ...(!hidePrincipalMoments
-            ? [{ key: "principal_moments", label: "Principal Moments" }]
-            : []),
-          { key: "dimensions", label: "Dimensions" },
-        ];
+        // Define validation checks based on file type
+        const getValidationChecks = () => {
+          if (requiredFileType === ".sldprt") {
+            return [
+              { key: "volume", label: "Volume" },
+              { key: "topology", label: "Topology" },
+              ...(!hidePrincipalMoments
+                ? [{ key: "principal_moments", label: "Principal Moments" }]
+                : []),
+              { key: "dimensions", label: "Dimensions" },
+            ];
+          } else if (requiredFileType === ".step") {
+            return [
+              { key: "volume", label: "Volume" },
+              { key: "topology", label: "Topology" },
+              { key: "dimensions", label: "Dimensions" },
+            ];
+          }
+          // Add more file type specific validations here if needed
+          return [];
+        };
+
+        const cadChecks = getValidationChecks();
 
         const feedbackObj =
           cadResult && typeof cadResult === "object"
@@ -454,6 +502,71 @@ export default function BeginnerExercise() {
       setResultLoading(false);
     }
   };
+
+  // helper to render assembly component validation
+  function renderAssemblyComponent(comp) {
+    return (
+      <div key={comp.label} className="bg-[#fafafd] rounded-lg p-4 mb-3">
+        <div className="flex items-center gap-3 mb-2">
+          {comp.isComponent ? (
+            <div className="font-semibold text-[#5c0000]">{comp.label}</div>
+          ) : (
+            <>
+              {comp.status === "success" ? (
+                <CheckCircle className="text-green-600" size={20} />
+              ) : (
+                <XCircle className="text-red-600" size={20} />
+              )}
+              <div className="flex-1">
+                <div className="flex justify-between">
+                  <div className="text-base">{comp.label}</div>
+                  {(typeof comp.actual !== 'undefined' && typeof comp.expected !== 'undefined') && (
+                    <div className="text-sm text-[#303033]">
+                      {comp.actual} / {comp.expected}
+                    </div>
+                  )}
+                </div>
+                {comp.message && (
+                  <div className="text-sm text-[#666]">{comp.message}</div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+        
+        {comp.isComponent && (
+          <div className="pl-4 text-sm">
+            <div className="flex items-center gap-2 mb-1">
+              {comp.volume ? (
+                <CheckCircle className="text-green-600" size={16} />
+              ) : (
+                <XCircle className="text-red-600" size={16} />
+              )}
+              <span>Volume Match: {comp.volumeScore}%</span>
+            </div>
+            
+            <div className="flex items-center gap-2 mb-1">
+              {comp.centerOfMass.ok ? (
+                <CheckCircle className="text-green-600" size={16} />
+              ) : (
+                <XCircle className="text-red-600" size={16} />
+              )}
+              <span>Center of Mass</span>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              {comp.topology ? (
+                <CheckCircle className="text-green-600" size={16} />
+              ) : (
+                <XCircle className="text-red-600" size={16} />
+              )}
+              <span>Topology Match</span>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   // small helper to render DXF entity rows
   function renderEntityRow(e) {
@@ -768,15 +881,21 @@ export default function BeginnerExercise() {
                     ))}
                   </div>
 
-                  {/* CAD / DXF Results */}
+                  {/* CAD / DXF / Assembly Results */}
                   <div className="mb-6">
                     <h3 className="font-semibold text-[#5c0000] mb-3">
                       {requiredFileType === ".dxf"
                         ? "DXF Entity Validation"
+                        : requiredFileType === ".sldasm"
+                        ? "Assembly Validation"
                         : "CAD Model Validation"}
                     </h3>
 
-                    {requiredFileType === ".dxf" ? (
+                    {resultData.cadResults[0]?.isComponent || resultData.cadResults[0]?.label === "Component Count" ? (
+                      <div className="mb-3">
+                        {resultData.cadResults.map(comp => renderAssemblyComponent(comp))}
+                      </div>
+                    ) : requiredFileType === ".dxf" ? (
                       <>
                         <div className="mb-3 text-sm text-[#303033]">
                           Drawing entity check (lines, circles, text, etc.)
