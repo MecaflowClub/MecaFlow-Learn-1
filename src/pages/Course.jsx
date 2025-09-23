@@ -74,16 +74,32 @@ export default function Course() {
 
   // Fetch exercises for each course
   useEffect(() => {
-    courses.forEach((course) => {
-      fetch(`${import.meta.env.VITE_API_URL}/api/exercises?course_id=${course._id}`)
-        .then((res) => res.json())
-        .then((data) => {
-          setExercisesByCourse((prev) => ({
-            ...prev,
-            [course._id]: data.exercises || [],
-          }));
+    if (!courses.length) return;
+
+    const fetchExercises = async () => {
+      try {
+        const exercisePromises = courses.map(course => 
+          fetch(`${import.meta.env.VITE_API_URL}/api/exercises?course_id=${course._id}`)
+            .then(res => res.json())
+            .then(data => ({
+              courseId: course._id,
+              exercises: data.exercises || []
+            }))
+        );
+
+        const results = await Promise.all(exercisePromises);
+        const exercisesMap = {};
+        results.forEach(({ courseId, exercises }) => {
+          exercisesMap[courseId] = exercises;
         });
-    });
+
+        setExercisesByCourse(exercisesMap);
+      } catch (error) {
+        console.error('Error fetching exercises:', error);
+      }
+    };
+
+    fetchExercises();
   }, [courses]);
 
   // Fetch user progress
@@ -167,9 +183,12 @@ export default function Course() {
 
       <div className="flex-1 w-full max-w-7xl mx-auto px-4 py-8">
         {courses.map((course) => {
-          const exercises = (exercisesByCourse[course._id] || []).filter(
-            (ex) => ex.course_id === course._id
-          );
+          const exercises = (exercisesByCourse[course._id] || [])
+            .filter((ex) => ex.course_id === course._id)
+            .sort((a, b) => {
+              // Sort by order field
+              return (a.order || 0) - (b.order || 0);
+            });
           
           // Same calculation as Dashboard
           const normalizedCompletedExercises = completedExercises.map(String);
@@ -313,10 +332,13 @@ export default function Course() {
                   let cursor = "cursor-not-allowed";
 
                   // Find reviewed score from backend
-                  const reviewed = scores.find(r => String(r.exercise_id).trim() === String(ex._id).trim());
-                  const reviewedScore = reviewed && typeof reviewed.score === "number" ? reviewed.score : null;
+                  const reviewed = scores.find(r => String(r.exercise_id) === String(ex._id));
+                  const reviewedScore = reviewed ? reviewed.score : null;
+
                   // Local just submitted and passed
-                  const localJustSubmitted = lastSubmission && String(lastSubmission.exercise_id) === String(ex._id) && lastSubmission.score >= 90;
+                  const localJustSubmitted = lastSubmission && 
+                                            String(lastSubmission.exercise_id) === String(ex._id) &&
+                                            lastSubmission.cad_comparison?.global_score >= 90;
 
                   if (isCompleted) {
                     if ((reviewedScore !== null && reviewedScore >= 90) || localJustSubmitted) {
