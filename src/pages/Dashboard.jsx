@@ -26,7 +26,12 @@ export default function Dashboard() {
     fetch(`${import.meta.env.VITE_API_URL}/api/courses`)
       .then((res) => res.json())
       .then((data) => {
-        setCourses(data.courses || []);
+        // Sort courses by level before setting state
+        const sortedCourses = (data.courses || []).sort((a, b) => {
+          const levelOrder = { "beginner": 1, "intermediate": 2, "advanced": 3 };
+          return levelOrder[a.level] - levelOrder[b.level];
+        });
+        setCourses(sortedCourses);
       })
       .catch(error => {
         console.error("Error fetching courses:", error);

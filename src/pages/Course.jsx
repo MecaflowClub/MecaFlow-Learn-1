@@ -1,4 +1,4 @@
-  // Helper to instantly unlock manual validation exercises after submission
+// Helper to instantly unlock manual validation exercises after submission
   function unlockManualValidationExercise(exerciseId) {
     if (!completedKey) return;
     setCompletedExercises((prev) => {
@@ -141,6 +141,14 @@ export default function Course() {
   }, []); // Only run once on mount
 
   // No need for localStorage effect anymore since we're using backend data only
+
+  // Add this sorting function before rendering
+  const sortedExercises = exercises.sort((a, b) => {
+    // Extract numbers from exercise IDs (e.g., "01", "02", etc.)
+    const aNum = parseInt(a.exercise_id);
+    const bNum = parseInt(b.exercise_id);
+    return aNum - bNum;
+  });
 
   return (
     <div className="min-h-screen mt-18 bg-[#e7e7f2] font-worksans flex flex-col">
