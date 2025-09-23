@@ -218,43 +218,281 @@ export default function BeginnerExercise() {
         }
       );
       const data = await res.json();
+      
+      if (!data.success) {
+        throw new Error(data.message || "Submission failed");
+      }
 
-      // Determine levels / flags
+      // Determine exercise type and validation strategy
       const courseLevel = exercise.course_level || exercise.level || "";
       const order = exercise.order;
-      const isAdvanced = courseLevel === "advanced";
-      const isManualValidation =
-        (isAdvanced && [6, 7, 13].includes(order)) ||
-        (courseLevel === "intermediate" && order === 18);
-
-      const isDXF = isAdvanced && order === 11;
-
-      let statusMessage = "";
-      let allowNext = false;
+      const exerciseType = (() => {
+        if (courseLevel === "advanced" && order === 11) return "dxf";
+        if ((courseLevel === "advanced" && [6, 7, 13].includes(order)) ||
+            (courseLevel === "intermediate" && order === 18)) return "manual";
+        if (requiredFileType === ".sldasm") return "assembly";
+        return "cad";
+      })();
 
       // Parse submission & cad result
       const submission = data.submission || {};
       const cadResult = submission.cad_comparison || submission.cadResult || {};
 
-      // QCM correction (unchanged)
-      let qcmResults = [];
-      if (exercise.qcm) {
-        qcmResults = exercise.qcm.map((q, i) => {
-          const selected = (quizAnswers[i] || []).map((idx) => idx + 1);
-          const correct = [...q.answers].sort();
-          const user = [...selected].sort();
-          const isCorrect =
-            correct.length === user.length &&
-            correct.every((ans, idx) => ans === user[idx]);
+      // Initialize validation state
+      const validationState = {
+        cadResults: [],
+        message: "",
+        allowNext: false,
+        score: submission.score ?? cadResult.global_score ?? cadResult.score ?? null
+      };
+
+      // Helper function to process assembly validation results
+      function processAssemblyValidation(data) {
+        const assemblyData = data.cad_comparison || data;
+        
+        // Check if we have valid assembly data
+        if (!assemblyData || !assemblyData.num_components || !Array.isArray(assemblyData.components_match)) {
           return {
-            question: q.question,
-            isCorrect,
-            selected,
-            correct,
-            options: q.options,
+            isValid: false,
+            results: [],
+            success: false,
+            message: "Invalid assembly validation data"
           };
-        });
+        }
+
+        // Process component count
+        const componentCountResult = {
+          type: "component_count",
+          label: "Component Count",
+          status: assemblyData.num_components.ok ? "success" : "fail",
+          message: assemblyData.num_components.message,
+          actual: assemblyData.num_components.submitted,
+          expected: assemblyData.num_components.reference
+        };
+
+        // Process individual components
+        const componentResults = assemblyData.components_match.map((comp, idx) => ({
+          type: "component",
+          label: `Component ${idx + 1}`,
+          checks: {
+            volume: {
+              ok: comp.volume_ok,
+              score: comp.volume_score
+            },
+            centerOfMass: {
+              ok: comp.center_of_mass_ok,
+              submitted: comp.center_of_mass_sub,
+              reference: comp.center_of_mass_ref
+            },
+            topology: {
+              ok: comp.topology_match
+            }
+          },
+          allPassed: comp.volume_ok && comp.center_of_mass_ok && comp.topology_match
+        }));
+
+        const allComponentsPassed = componentResults.every(comp => comp.allPassed);
+        const success = assemblyData.num_components.ok && allComponentsPassed;
+
+        return {
+          isValid: true,
+          results: [componentCountResult, ...componentResults],
+          success,
+          message: success 
+            ? "Assembly validation successful! All components match the reference."
+            : "Assembly validation failed. Please check component details."
+        };
       }
+
+      // Process QCM results
+      const qcmResults = exercise.qcm?.map((q, i) => {
+        const selected = (quizAnswers[i] || []).map((idx) => idx + 1);
+        const correct = [...q.answers].sort();
+        const user = [...selected].sort();
+        const isCorrect =
+          correct.length === user.length &&
+          correct.every((ans, idx) => ans === user[idx]);
+        return {
+          question: q.question,
+          isCorrect,
+          selected,
+          correct,
+          options: q.options,
+        };
+      }) || [];
+
+      // Process validation results based on exercise type
+      const processValidationResults = () => {
+        const baseData = cadResult.cad_comparison || cadResult;
+        
+        // For assembly validation
+        if (exerciseType === "assembly") {
+          if (!baseData?.num_components || !Array.isArray(baseData.components_match)) {
+            return {
+              success: false,
+              message: "Invalid assembly data format",
+              results: [],
+              allowNext: false
+            };
+          }
+
+          const components = baseData.components_match.map((comp, idx) => ({
+            type: "component",
+            label: `Component ${idx + 1}`,
+            checks: {
+              volume: {
+                ok: comp.volume_ok,
+                score: Number(comp.volume_score).toFixed(1)
+              },
+              centerOfMass: {
+                ok: comp.center_of_mass_ok,
+                submitted: comp.center_of_mass_sub,
+                reference: comp.center_of_mass_ref
+              },
+              topology: {
+                ok: comp.topology_match
+              }
+            },
+            allPassed: comp.volume_ok && comp.center_of_mass_ok && comp.topology_match
+          }));
+
+          const allValid = components.every(c => c.allPassed) && baseData.num_components.ok;
+
+          return {
+            success: allValid,
+            message: allValid 
+              ? "All components match the reference model perfectly!"
+              : "Some components don't match the reference. Check the details below.",
+            results: [
+              {
+                type: "count",
+                label: "Component Count",
+                status: baseData.num_components.ok ? "success" : "fail",
+                actual: baseData.num_components.submitted,
+                expected: baseData.num_components.reference
+              },
+              ...components
+            ],
+            allowNext: allValid
+          };
+        }
+        
+        return { success: false, message: "Unknown validation type", results: [], allowNext: false };
+      };
+      function processAssemblyValidation(data) {
+        const assemblyData = data.cad_comparison || data;
+        
+        // Check if we have valid assembly data
+        if (!assemblyData || !assemblyData.num_components || !Array.isArray(assemblyData.components_match)) {
+          return {
+            isValid: false,
+            results: [],
+            success: false,
+            message: "Invalid assembly validation data"
+          };
+        }
+
+        // Process component count
+        const componentCountResult = {
+          type: "component_count",
+          label: "Component Count",
+          status: assemblyData.num_components.ok ? "success" : "fail",
+          message: assemblyData.num_components.message,
+          actual: assemblyData.num_components.submitted,
+          expected: assemblyData.num_components.reference
+        };
+
+        // Process individual components
+        const componentResults = assemblyData.components_match.map((comp, idx) => ({
+          type: "component",
+          label: `Component ${idx + 1}`,
+          checks: {
+            volume: {
+              ok: comp.volume_ok,
+              score: comp.volume_score
+            },
+            centerOfMass: {
+              ok: comp.center_of_mass_ok,
+              submitted: comp.center_of_mass_sub,
+              reference: comp.center_of_mass_ref
+            },
+            topology: {
+              ok: comp.topology_match
+            }
+          },
+          allPassed: comp.volume_ok && comp.center_of_mass_ok && comp.topology_match
+        }));
+
+        const allComponentsPassed = componentResults.every(comp => comp.allPassed);
+        const success = assemblyData.num_components.ok && allComponentsPassed;
+
+        return {
+          isValid: true,
+          results: [componentCountResult, ...componentResults],
+          success,
+          message: success 
+            ? "Assembly validation successful! All components match the reference."
+            : "Assembly validation failed. Please check component details."
+        };
+      }
+
+      // Helper function to process assembly validation results
+      const processAssemblyResult = (data) => {
+        const assemblyData = data.cad_comparison || data;
+        
+        if (!assemblyData || !assemblyData.num_components || !Array.isArray(assemblyData.components_match)) {
+          return {
+            results: [],
+            isValid: false,
+            message: "Invalid assembly data format",
+            allowNext: false
+          };
+        }
+
+        const componentCountResult = {
+          type: "component_count",
+          label: "Component Count",
+          status: assemblyData.num_components.ok ? "success" : "fail",
+          actual: assemblyData.num_components.submitted,
+          expected: assemblyData.num_components.reference
+        };
+
+        const componentResults = assemblyData.components_match.map((comp, idx) => ({
+          type: "component",
+          label: `Component ${idx + 1}`,
+          checks: {
+            volume: {
+              ok: comp.volume_ok,
+              score: comp.volume_score
+            },
+            centerOfMass: {
+              ok: comp.center_of_mass_ok,
+              submitted: comp.center_of_mass_sub,
+              reference: comp.center_of_mass_ref
+            },
+            topology: {
+              ok: comp.topology_match
+            }
+          }
+        }));
+
+        const allComponentsMatch = componentResults.every(comp =>
+          comp.checks.volume.ok && 
+          comp.checks.centerOfMass.ok && 
+          comp.checks.topology.ok
+        );
+
+        const success = assemblyData.num_components.ok && allComponentsMatch;
+
+        return {
+          results: [componentCountResult, ...componentResults],
+          isValid: true,
+          message: success 
+            ? "Assembly validation successful! All components match the reference model."
+            : "Some components do not match the reference model. Please check the details.",
+          allowNext: success
+        };
+      };
 
       // Score detection (defensive)
       const score =
@@ -264,19 +502,21 @@ export default function BeginnerExercise() {
           cadResult.feedback?.global_score ??
           null);
 
-      // Default cadResults (for non-DXF or fallback)
-      let cadResults = [];
-      let cadProperties = {
-        volume: cadResult.volume_value ?? cadResult.volume,
-        principal_moments: cadResult.principal_moments,
-        dimensions: cadResult.dimensions,
-        topology: cadResult.topology,
-      };
+      // Check the type of validation we need
+      const isAssemblyExercise = requiredFileType === ".sldasm";
+      const isDxfExercise = requiredFileType === ".dxf";
 
-      // Check if this is an assembly validation response - handle both direct and nested paths
-      const isAssemblyResponse = 
-        (cadResult && cadResult.num_components && Array.isArray(cadResult.components_match)) || 
-        (cadResult && cadResult.cad_comparison && cadResult.cad_comparison.num_components && Array.isArray(cadResult.cad_comparison.components_match));
+      // Initialize results
+      let cadResults = [];
+      let statusMessage = "";
+      let allowNext = false;
+
+      // Get validation results based on exercise type
+      if (isAssemblyExercise) {
+        const assemblyValidation = processAssemblyValidation(cadResult);
+        cadResults = assemblyValidation.results;
+        statusMessage = assemblyValidation.message;
+        allowNext = assemblyValidation.success;
 
       // Get the correct assembly data object
       const assemblyData = cadResult.cad_comparison || cadResult;
@@ -486,15 +726,18 @@ export default function BeginnerExercise() {
         }
       }
 
+      // Process validation based on exercise type
+      const validationResults = processValidationResults();
+      const finalScore = validationResults.success ? 100 : 0;
+
       // Put together final resultData
       setResultData({
         qcmResults,
-        cadResults,
-        score,
-        feedback: cadResult.feedback ?? cadResult.error ?? "",
-        cadProperties,
-        statusMessage,
-        allowNext,
+        cadResults: validationResults.results,
+        score: finalScore,
+        feedback: validationResults.message,
+        statusMessage: validationResults.message,
+        allowNext: validationResults.allowNext,
       });
     } catch (err) {
       console.error("Submission error", err);
@@ -901,11 +1144,73 @@ export default function BeginnerExercise() {
                         : "CAD Model Validation"}
                     </h3>
 
-                    {resultData.cadResults[0]?.isComponent ? (
-                      <div className="mb-3">
-                        {resultData.cadResults.map(comp => renderAssemblyComponent(comp))}
-                      </div>
-                    ) : requiredFileType === ".dxf" ? (
+                    {(() => {
+                      // Handle assembly validation results
+                      if (requiredFileType === ".sldasm" && resultData.cadResults[0]?.type === "component") {
+                        return (
+                          <div className="space-y-4">
+                            {resultData.cadResults.map((result, idx) => (
+                              <div key={idx} className="bg-[#fafafd] rounded-lg p-4">
+                                {result.type === "component_count" ? (
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                      {result.status === "success" ? (
+                                        <CheckCircle className="text-green-600" size={20} />
+                                      ) : (
+                                        <XCircle className="text-red-600" size={20} />
+                                      )}
+                                      <span className="font-medium">{result.label}</span>
+                                    </div>
+                                    <span className="text-sm">
+                                      {result.actual} / {result.expected}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <div className="space-y-3">
+                                    <div className="flex items-center gap-2">
+                                      {result.checks.volume.ok && result.checks.centerOfMass.ok && result.checks.topology.ok ? (
+                                        <CheckCircle className="text-green-600" size={20} />
+                                      ) : (
+                                        <XCircle className="text-red-600" size={20} />
+                                      )}
+                                      <span className="font-medium">{result.label}</span>
+                                    </div>
+                                    <div className="pl-6 space-y-2 text-sm">
+                                      <div className="flex items-center gap-2">
+                                        {result.checks.volume.ok ? (
+                                          <CheckCircle className="text-green-600" size={16} />
+                                        ) : (
+                                          <XCircle className="text-red-600" size={16} />
+                                        )}
+                                        <span>Volume Match: {result.checks.volume.score}%</span>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        {result.checks.centerOfMass.ok ? (
+                                          <CheckCircle className="text-green-600" size={16} />
+                                        ) : (
+                                          <XCircle className="text-red-600" size={16} />
+                                        )}
+                                        <span>Center of Mass Match</span>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        {result.checks.topology.ok ? (
+                                          <CheckCircle className="text-green-600" size={16} />
+                                        ) : (
+                                          <XCircle className="text-red-600" size={16} />
+                                        )}
+                                        <span>Topology Match</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      }
+                      
+                      // Handle DXF validation
+                      if (requiredFileType === ".dxf") {
                       <>
                         <div className="mb-3 text-sm text-[#303033]">
                           Drawing entity check (lines, circles, text, etc.)
