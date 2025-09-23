@@ -273,10 +273,58 @@ export default function BeginnerExercise() {
         topology: cadResult.topology,
       };
 
-      // Check if this is an assembly validation response
-      const isAssemblyResponse = cadResult && cadResult.num_components && Array.isArray(cadResult.components_match);
+      // Check if this is an assembly validation response - handle both direct and nested paths
+      const isAssemblyResponse = 
+        (cadResult && cadResult.num_components && Array.isArray(cadResult.components_match)) || 
+        (cadResult && cadResult.cad_comparison && cadResult.cad_comparison.num_components && Array.isArray(cadResult.cad_comparison.components_match));
 
-      if (isDXF) {
+      // Get the correct assembly data object
+      const assemblyData = cadResult.cad_comparison || cadResult;
+
+      if (isAssemblyResponse) {
+        // Assembly validation results
+        cadResults = [
+          {
+            label: "Component Count",
+            status: assemblyData.num_components.ok ? "success" : "fail",
+            message: assemblyData.num_components.message,
+            actual: assemblyData.num_components.submitted,
+            expected: assemblyData.num_components.reference
+          },
+          ...assemblyData.components_match.map((comp, idx) => ({
+            label: `Component ${idx + 1}`,
+            isComponent: true,
+            volume: {
+              status: comp.volume_ok ? "success" : "fail",
+              score: comp.volume_score
+            },
+            centerOfMass: {
+              status: comp.center_of_mass_ok ? "success" : "fail",
+              submitted: comp.center_of_mass_sub,
+              reference: comp.center_of_mass_ref
+            },
+            topology: {
+              status: comp.topology_match ? "success" : "fail"
+            },
+            allPassed: comp.volume_ok && comp.center_of_mass_ok && comp.topology_match
+          }))
+        ];
+
+        const allComponentsPassed = assemblyData.components_match.every(comp => 
+          comp.volume_ok && comp.center_of_mass_ok && comp.topology_match
+        );
+
+        const globalSuccessful = assemblyData.global_score === 100.0 && 
+                               assemblyData.num_components.ok &&
+                               allComponentsPassed;
+
+        statusMessage = globalSuccessful
+          ? "Assembly validation successful! All components match the reference."
+          : "Assembly validation failed. Please check component details.";
+        
+        allowNext = globalSuccessful;
+
+      } else if (isDXF) {
         // extract entity counts & bounding box & matches
         const entityCounts = extractDXFEntityCounts(cadResult) || {};
         const boundingBox = extractBoundingBox(cadResult);
@@ -457,6 +505,78 @@ export default function BeginnerExercise() {
       setResultLoading(false);
     }
   };
+
+  // helper to render assembly component validation
+  function renderAssemblyComponent(comp) {
+    return (
+      <div key={comp.label} className="bg-[#fafafd] rounded-lg p-4 mb-3">
+        <div className="flex items-center gap-3 mb-2">
+          {!comp.isComponent ? (
+            <>
+              {comp.status === "success" ? (
+                <CheckCircle className="text-green-600" size={20} />
+              ) : (
+                <XCircle className="text-red-600" size={20} />
+              )}
+              <div className="flex-1">
+                <div className="flex justify-between">
+                  <div className="text-base">{comp.label}</div>
+                  {(typeof comp.actual !== 'undefined' && typeof comp.expected !== 'undefined') && (
+                    <div className="text-sm text-[#303033]">
+                      {comp.actual} / {comp.expected}
+                    </div>
+                  )}
+                </div>
+                {comp.message && (
+                  <div className="text-sm text-[#666]">{comp.message}</div>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              {comp.allPassed ? (
+                <CheckCircle className="text-green-600" size={20} />
+              ) : (
+                <XCircle className="text-red-600" size={20} />
+              )}
+              <div className="text-base font-semibold">{comp.label}</div>
+            </>
+          )}
+        </div>
+        
+        {comp.isComponent && (
+          <div className="pl-4 text-sm space-y-2">
+            <div className="flex items-center gap-2">
+              {comp.volume.status === "success" ? (
+                <CheckCircle className="text-green-600" size={16} />
+              ) : (
+                <XCircle className="text-red-600" size={16} />
+              )}
+              <span>Volume Match: {comp.volume.score}%</span>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              {comp.centerOfMass.status === "success" ? (
+                <CheckCircle className="text-green-600" size={16} />
+              ) : (
+                <XCircle className="text-red-600" size={16} />
+              )}
+              <span>Center of Mass</span>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              {comp.topology.status === "success" ? (
+                <CheckCircle className="text-green-600" size={16} />
+              ) : (
+                <XCircle className="text-red-600" size={16} />
+              )}
+              <span>Topology Match</span>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   // small helper to render DXF entity rows
   function renderEntityRow(e) {
@@ -776,10 +896,16 @@ export default function BeginnerExercise() {
                     <h3 className="font-semibold text-[#5c0000] mb-3">
                       {requiredFileType === ".dxf"
                         ? "DXF Entity Validation"
+                        : requiredFileType === ".sldasm"
+                        ? "Assembly Validation"
                         : "CAD Model Validation"}
                     </h3>
 
-                    {requiredFileType === ".dxf" ? (
+                    {resultData.cadResults[0]?.isComponent ? (
+                      <div className="mb-3">
+                        {resultData.cadResults.map(comp => renderAssemblyComponent(comp))}
+                      </div>
+                    ) : requiredFileType === ".dxf" ? (
                       <>
                         <div className="mb-3 text-sm text-[#303033]">
                           Drawing entity check (lines, circles, text, etc.)
