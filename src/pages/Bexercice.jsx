@@ -414,35 +414,20 @@ export default function BeginnerExercise() {
           rawCadResult: cadResult,
         };
       } else {
-        // Non-DXF and Non-Assembly: show appropriate validation based on file type
+        // Non-DXF: reuse previous logic, show the cadChecks mapping
         const hidePrincipalMoments =
           ["68c4831609f681ae64cc4e5c", "68c4831609f681ae64cc4e5f"].includes(
             exercise._id
           );
 
-        // Define validation checks based on file type
-        const getValidationChecks = () => {
-          if (requiredFileType === ".sldprt") {
-            return [
-              { key: "volume", label: "Volume" },
-              { key: "topology", label: "Topology" },
-              ...(!hidePrincipalMoments
-                ? [{ key: "principal_moments", label: "Principal Moments" }]
-                : []),
-              { key: "dimensions", label: "Dimensions" },
-            ];
-          } else if (requiredFileType === ".step") {
-            return [
-              { key: "volume", label: "Volume" },
-              { key: "topology", label: "Topology" },
-              { key: "dimensions", label: "Dimensions" },
-            ];
-          }
-          // Add more file type specific validations here if needed
-          return [];
-        };
-
-        const cadChecks = getValidationChecks();
+        const cadChecks = [
+          { key: "volume", label: "Volume" },
+          { key: "topology", label: "Topology" },
+          ...(!hidePrincipalMoments
+            ? [{ key: "principal_moments", label: "Principal Moments" }]
+            : []),
+          { key: "dimensions", label: "Dimensions" },
+        ];
 
         const feedbackObj =
           cadResult && typeof cadResult === "object"
