@@ -871,11 +871,10 @@ function BeginnerExercise() {
       {/* === RESULT CARD === */}
       {resultOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center"
+          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto py-8"
           style={{
             background: "rgba(245, 245, 250, 0.85)",
-            backdropFilter: "blur(2px)",
-            height: "100vh"
+            backdropFilter: "blur(2px)"
           }}
         >
           {isManualValidationExercise() ? (
@@ -960,11 +959,12 @@ function BeginnerExercise() {
             </div>
           ) : (
             <div 
-              className="bg-white rounded-xl shadow-lg w-full relative animate-fade-in flex flex-col mx-auto" 
+              className="bg-white rounded-xl shadow-lg w-full relative animate-fade-in flex flex-col" 
               style={{ 
                 maxHeight: 'calc(100vh - 2rem)',
                 maxWidth: '32rem',
-                margin: '1rem'
+                margin: '1rem',
+                overflowY: 'auto'
               }}
             >
               <div className="flex-none p-4 border-b border-gray-100">
@@ -980,7 +980,7 @@ function BeginnerExercise() {
               </h2>
               </div>
               
-              <div className="flex-1 overflow-y-auto p-4">
+              <div className="flex-1 p-4">
               {resultLoading ? (
                 <div className="flex flex-col items-center gap-3 py-12">
                   <Loader2 className="animate-spin text-[#5c0000]" size={40} />
