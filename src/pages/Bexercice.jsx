@@ -19,7 +19,7 @@ import { useAuth } from "../components/AuthContext";
  *
  * Replace your existing BeginnerExercise component with this file.
  */
-export default function BeginnerExercise() {
+function BeginnerExercise() {
   const { id } = useParams();
   const { token, fetchWithAuth, logout } = useAuth();
   const [exercise, setExercise] = useState(null);
@@ -218,281 +218,92 @@ export default function BeginnerExercise() {
         }
       );
       const data = await res.json();
-      
-      if (!data.success) {
-        throw new Error(data.message || "Submission failed");
-      }
 
-      // Determine exercise type and validation strategy
+      // Determine levels / flags
       const courseLevel = exercise.course_level || exercise.level || "";
       const order = exercise.order;
-      const exerciseType = (() => {
-        if (courseLevel === "advanced" && order === 11) return "dxf";
-        if ((courseLevel === "advanced" && [6, 7, 13].includes(order)) ||
-            (courseLevel === "intermediate" && order === 18)) return "manual";
-        if (requiredFileType === ".sldasm") return "assembly";
-        return "cad";
-      })();
+      const isAdvanced = courseLevel === "advanced";
+      const isManualValidation =
+        (isAdvanced && [6, 7, 13].includes(order)) ||
+        (courseLevel === "intermediate" && order === 18);
+
+      const isDXF = isAdvanced && order === 11;
+
+      let statusMessage = "";
+      let allowNext = false;
 
       // Parse submission & cad result
       const submission = data.submission || {};
       const cadResult = submission.cad_comparison || submission.cadResult || {};
+      let validationResults = { success: false, message: "", results: [], allowNext: false };
 
-      // Initialize validation state
-      const validationState = {
-        cadResults: [],
-        message: "",
-        allowNext: false,
-        score: submission.score ?? cadResult.global_score ?? cadResult.score ?? null
-      };
-
-      // Helper function to process assembly validation results
-      function processAssemblyValidation(data) {
-        const assemblyData = data.cad_comparison || data;
+      // Process assembly validation if it's an assembly file
+      if (requiredFileType === ".sldasm") {
+        const assemblyData = cadResult;
         
-        // Check if we have valid assembly data
-        if (!assemblyData || !assemblyData.num_components || !Array.isArray(assemblyData.components_match)) {
-          return {
-            isValid: false,
-            results: [],
-            success: false,
-            message: "Invalid assembly validation data"
-          };
+        if (!assemblyData?.num_components || !Array.isArray(assemblyData?.components_match)) {
+          throw new Error("Invalid assembly data structure");
         }
 
-        // Process component count
-        const componentCountResult = {
-          type: "component_count",
+        // Component count validation
+        const componentCount = {
+          type: "count",
           label: "Component Count",
-          status: assemblyData.num_components.ok ? "success" : "fail",
-          message: assemblyData.num_components.message,
+          isComponent: false,
+          status: assemblyData.num_components.ok ? "success" : "error",
           actual: assemblyData.num_components.submitted,
-          expected: assemblyData.num_components.reference
+          expected: assemblyData.num_components.reference,
+          message: assemblyData.num_components.message
         };
 
-        // Process individual components
+        // Individual component validations
         const componentResults = assemblyData.components_match.map((comp, idx) => ({
           type: "component",
           label: `Component ${idx + 1}`,
-          checks: {
-            volume: {
-              ok: comp.volume_ok,
-              score: comp.volume_score
-            },
-            centerOfMass: {
-              ok: comp.center_of_mass_ok,
-              submitted: comp.center_of_mass_sub,
-              reference: comp.center_of_mass_ref
-            },
-            topology: {
-              ok: comp.topology_match
-            }
+          isComponent: true,
+          volume: {
+            status: comp.volume_ok ? "success" : "error",
+            score: Math.round(comp.volume_score * 100)
+          },
+          centerOfMass: {
+            status: comp.center_of_mass_ok ? "success" : "error"
+          },
+          topology: {
+            status: comp.topology_match ? "success" : "error"
           },
           allPassed: comp.volume_ok && comp.center_of_mass_ok && comp.topology_match
         }));
 
-        const allComponentsPassed = componentResults.every(comp => comp.allPassed);
-        const success = assemblyData.num_components.ok && allComponentsPassed;
-
-        return {
-          isValid: true,
-          results: [componentCountResult, ...componentResults],
-          success,
-          message: success 
-            ? "Assembly validation successful! All components match the reference."
-            : "Assembly validation failed. Please check component details."
+        const allValid = componentResults.every(c => c.allPassed) && assemblyData.num_components.ok;
+        validationResults = {
+          success: allValid,
+          message: allValid 
+            ? "Assembly validation successful! All components match perfectly." 
+            : "Some components don't match. Please check the details below.",
+          results: [componentCount, ...componentResults],
+          allowNext: allValid
         };
       }
 
-      // Process QCM results
-      const qcmResults = exercise.qcm?.map((q, i) => {
-        const selected = (quizAnswers[i] || []).map((idx) => idx + 1);
-        const correct = [...q.answers].sort();
-        const user = [...selected].sort();
-        const isCorrect =
-          correct.length === user.length &&
-          correct.every((ans, idx) => ans === user[idx]);
-        return {
-          question: q.question,
-          isCorrect,
-          selected,
-          correct,
-          options: q.options,
-        };
-      }) || [];
-
-      // Process validation results based on exercise type
-      const processValidationResults = () => {
-        const baseData = cadResult.cad_comparison || cadResult;
-        
-        // For assembly validation
-        if (exerciseType === "assembly") {
-          if (!baseData?.num_components || !Array.isArray(baseData.components_match)) {
-            return {
-              success: false,
-              message: "Invalid assembly data format",
-              results: [],
-              allowNext: false
-            };
-          }
-
-          const components = baseData.components_match.map((comp, idx) => ({
-            type: "component",
-            label: `Component ${idx + 1}`,
-            checks: {
-              volume: {
-                ok: comp.volume_ok,
-                score: Number(comp.volume_score).toFixed(1)
-              },
-              centerOfMass: {
-                ok: comp.center_of_mass_ok,
-                submitted: comp.center_of_mass_sub,
-                reference: comp.center_of_mass_ref
-              },
-              topology: {
-                ok: comp.topology_match
-              }
-            },
-            allPassed: comp.volume_ok && comp.center_of_mass_ok && comp.topology_match
-          }));
-
-          const allValid = components.every(c => c.allPassed) && baseData.num_components.ok;
-
+      // QCM correction (unchanged)
+      let qcmResults = [];
+      if (exercise.qcm) {
+        qcmResults = exercise.qcm.map((q, i) => {
+          const selected = (quizAnswers[i] || []).map((idx) => idx + 1);
+          const correct = [...q.answers].sort();
+          const user = [...selected].sort();
+          const isCorrect =
+            correct.length === user.length &&
+            correct.every((ans, idx) => ans === user[idx]);
           return {
-            success: allValid,
-            message: allValid 
-              ? "All components match the reference model perfectly!"
-              : "Some components don't match the reference. Check the details below.",
-            results: [
-              {
-                type: "count",
-                label: "Component Count",
-                status: baseData.num_components.ok ? "success" : "fail",
-                actual: baseData.num_components.submitted,
-                expected: baseData.num_components.reference
-              },
-              ...components
-            ],
-            allowNext: allValid
+            question: q.question,
+            isCorrect,
+            selected,
+            correct,
+            options: q.options,
           };
-        }
-        
-        return { success: false, message: "Unknown validation type", results: [], allowNext: false };
-      };
-      function processAssemblyValidation(data) {
-        const assemblyData = data.cad_comparison || data;
-        
-        // Check if we have valid assembly data
-        if (!assemblyData || !assemblyData.num_components || !Array.isArray(assemblyData.components_match)) {
-          return {
-            isValid: false,
-            results: [],
-            success: false,
-            message: "Invalid assembly validation data"
-          };
-        }
-
-        // Process component count
-        const componentCountResult = {
-          type: "component_count",
-          label: "Component Count",
-          status: assemblyData.num_components.ok ? "success" : "fail",
-          message: assemblyData.num_components.message,
-          actual: assemblyData.num_components.submitted,
-          expected: assemblyData.num_components.reference
-        };
-
-        // Process individual components
-        const componentResults = assemblyData.components_match.map((comp, idx) => ({
-          type: "component",
-          label: `Component ${idx + 1}`,
-          checks: {
-            volume: {
-              ok: comp.volume_ok,
-              score: comp.volume_score
-            },
-            centerOfMass: {
-              ok: comp.center_of_mass_ok,
-              submitted: comp.center_of_mass_sub,
-              reference: comp.center_of_mass_ref
-            },
-            topology: {
-              ok: comp.topology_match
-            }
-          },
-          allPassed: comp.volume_ok && comp.center_of_mass_ok && comp.topology_match
-        }));
-
-        const allComponentsPassed = componentResults.every(comp => comp.allPassed);
-        const success = assemblyData.num_components.ok && allComponentsPassed;
-
-        return {
-          isValid: true,
-          results: [componentCountResult, ...componentResults],
-          success,
-          message: success 
-            ? "Assembly validation successful! All components match the reference."
-            : "Assembly validation failed. Please check component details."
-        };
+        });
       }
-
-      // Helper function to process assembly validation results
-      const processAssemblyResult = (data) => {
-        const assemblyData = data.cad_comparison || data;
-        
-        if (!assemblyData || !assemblyData.num_components || !Array.isArray(assemblyData.components_match)) {
-          return {
-            results: [],
-            isValid: false,
-            message: "Invalid assembly data format",
-            allowNext: false
-          };
-        }
-
-        const componentCountResult = {
-          type: "component_count",
-          label: "Component Count",
-          status: assemblyData.num_components.ok ? "success" : "fail",
-          actual: assemblyData.num_components.submitted,
-          expected: assemblyData.num_components.reference
-        };
-
-        const componentResults = assemblyData.components_match.map((comp, idx) => ({
-          type: "component",
-          label: `Component ${idx + 1}`,
-          checks: {
-            volume: {
-              ok: comp.volume_ok,
-              score: comp.volume_score
-            },
-            centerOfMass: {
-              ok: comp.center_of_mass_ok,
-              submitted: comp.center_of_mass_sub,
-              reference: comp.center_of_mass_ref
-            },
-            topology: {
-              ok: comp.topology_match
-            }
-          }
-        }));
-
-        const allComponentsMatch = componentResults.every(comp =>
-          comp.checks.volume.ok && 
-          comp.checks.centerOfMass.ok && 
-          comp.checks.topology.ok
-        );
-
-        const success = assemblyData.num_components.ok && allComponentsMatch;
-
-        return {
-          results: [componentCountResult, ...componentResults],
-          isValid: true,
-          message: success 
-            ? "Assembly validation successful! All components match the reference model."
-            : "Some components do not match the reference model. Please check the details.",
-          allowNext: success
-        };
-      };
 
       // Score detection (defensive)
       const score =
@@ -502,21 +313,19 @@ export default function BeginnerExercise() {
           cadResult.feedback?.global_score ??
           null);
 
-      // Check the type of validation we need
-      const isAssemblyExercise = requiredFileType === ".sldasm";
-      const isDxfExercise = requiredFileType === ".dxf";
-
-      // Initialize results
+      // Default cadResults (for non-DXF or fallback)
       let cadResults = [];
-      let statusMessage = "";
-      let allowNext = false;
+      let cadProperties = {
+        volume: cadResult.volume_value ?? cadResult.volume,
+        principal_moments: cadResult.principal_moments,
+        dimensions: cadResult.dimensions,
+        topology: cadResult.topology,
+      };
 
-      // Get validation results based on exercise type
-      if (isAssemblyExercise) {
-        const assemblyValidation = processAssemblyValidation(cadResult);
-        cadResults = assemblyValidation.results;
-        statusMessage = assemblyValidation.message;
-        allowNext = assemblyValidation.success;
+      // Check if this is an assembly validation response - handle both direct and nested paths
+      const isAssemblyResponse = 
+        (cadResult && cadResult.num_components && Array.isArray(cadResult.components_match)) || 
+        (cadResult && cadResult.cad_comparison && cadResult.cad_comparison.num_components && Array.isArray(cadResult.cad_comparison.components_match));
 
       // Get the correct assembly data object
       const assemblyData = cadResult.cad_comparison || cadResult;
@@ -726,18 +535,74 @@ export default function BeginnerExercise() {
         }
       }
 
-      // Process validation based on exercise type
-      const validationResults = processValidationResults();
-      const finalScore = validationResults.success ? 100 : 0;
+      // Process validation results
+      let finalResults = {
+        success: false,
+        cadResults: [],
+        message: "",
+        allowNext: false,
+        score: 0
+      };
+
+      if (requiredFileType === ".sldasm") {
+        // Assembly validation
+        if (cadResult.num_components && Array.isArray(cadResult.components_match)) {
+          const componentCount = {
+            type: "count",
+            label: "Component Count",
+            isComponent: false,
+            status: cadResult.num_components.ok ? "success" : "error",
+            actual: cadResult.num_components.submitted,
+            expected: cadResult.num_components.reference,
+            message: cadResult.num_components.message
+          };
+
+          const componentResults = cadResult.components_match.map((comp, idx) => ({
+            type: "component",
+            label: `Component ${idx + 1}`,
+            isComponent: true,
+            volume: {
+              status: comp.volume_ok ? "success" : "error",
+              score: Math.round(comp.volume_score * 100)
+            },
+            centerOfMass: {
+              status: comp.center_of_mass_ok ? "success" : "error"
+            },
+            topology: {
+              status: comp.topology_match ? "success" : "error"
+            },
+            allPassed: comp.volume_ok && comp.center_of_mass_ok && comp.topology_match
+          }));
+
+          const allValid = componentResults.every(c => c.allPassed) && cadResult.num_components.ok;
+          finalResults = {
+            success: allValid,
+            cadResults: [componentCount, ...componentResults],
+            message: allValid 
+              ? "Assembly validation successful! All components match perfectly." 
+              : "Some components don't match. Please check the details below.",
+            allowNext: allValid || isManualValidation,
+            score: allValid ? 100 : 0
+          };
+        }
+      } else {
+        // Standard CAD or DXF validation
+        finalResults = {
+          success: score >= 80,
+          cadResults,
+          message: statusMessage,
+          allowNext: allowNext || isManualValidation,
+          score
+        };
+      }
 
       // Put together final resultData
       setResultData({
         qcmResults,
-        cadResults: validationResults.results,
-        score: finalScore,
-        feedback: validationResults.message,
-        statusMessage: validationResults.message,
-        allowNext: validationResults.allowNext,
+        ...finalResults,
+        feedback: finalResults.message,
+        statusMessage: finalResults.message,
+        cadProperties
       });
     } catch (err) {
       console.error("Submission error", err);
@@ -751,72 +616,66 @@ export default function BeginnerExercise() {
 
   // helper to render assembly component validation
   function renderAssemblyComponent(comp) {
-    return (
-      <div key={comp.label} className="bg-[#fafafd] rounded-lg p-4 mb-3">
-        <div className="flex items-center gap-3 mb-2">
-          {!comp.isComponent ? (
-            <>
-              {comp.status === "success" ? (
-                <CheckCircle className="text-green-600" size={20} />
-              ) : (
-                <XCircle className="text-red-600" size={20} />
-              )}
-              <div className="flex-1">
-                <div className="flex justify-between">
-                  <div className="text-base">{comp.label}</div>
-                  {(typeof comp.actual !== 'undefined' && typeof comp.expected !== 'undefined') && (
-                    <div className="text-sm text-[#303033]">
-                      {comp.actual} / {comp.expected}
-                    </div>
-                  )}
-                </div>
-                {comp.message && (
-                  <div className="text-sm text-[#666]">{comp.message}</div>
-                )}
+    if (!comp) return null;
+
+    const renderComponentCount = () => (
+      <div className="flex items-center gap-3">
+        {comp.status === "success" ? (
+          <CheckCircle className="text-green-600" size={20} />
+        ) : (
+          <XCircle className="text-red-600" size={20} />
+        )}
+        <div className="flex-1">
+          <div className="flex justify-between">
+            <div className="text-base font-medium">{comp.label}</div>
+            {(typeof comp.actual !== 'undefined' && typeof comp.expected !== 'undefined') && (
+              <div className="text-sm text-[#303033]">
+                {comp.actual} / {comp.expected}
               </div>
-            </>
-          ) : (
-            <>
-              {comp.allPassed ? (
-                <CheckCircle className="text-green-600" size={20} />
-              ) : (
-                <XCircle className="text-red-600" size={20} />
-              )}
-              <div className="text-base font-semibold">{comp.label}</div>
-            </>
+            )}
+          </div>
+          {comp.message && (
+            <div className="text-sm text-[#666]">{comp.message}</div>
           )}
         </div>
-        
-        {comp.isComponent && (
-          <div className="pl-4 text-sm space-y-2">
-            <div className="flex items-center gap-2">
-              {comp.volume.status === "success" ? (
-                <CheckCircle className="text-green-600" size={16} />
-              ) : (
-                <XCircle className="text-red-600" size={16} />
+      </div>
+    );
+
+    const renderComponent = () => {
+      // Calcule le score global pour la pièce
+      const totalChecks = [comp.volume, comp.centerOfMass, comp.topology].filter(Boolean).length;
+      const passedChecks = [comp.volume, comp.centerOfMass, comp.topology].filter(check => check?.status === 'success').length;
+      const overallScore = Math.round((passedChecks / totalChecks) * 100);
+
+      return (
+        <div className="flex items-center justify-between py-1">
+          <div className="flex items-center gap-3">
+            {comp.allPassed ? (
+              <CheckCircle className="text-green-600" size={20} />
+            ) : (
+              <XCircle className="text-red-600" size={20} />
+            )}
+            <div className="font-medium">
+              <div>{comp.label}</div>
+              {!comp.allPassed && (
+                <div className="text-xs text-gray-500 mt-0.5">
+                  {comp.volume?.status !== 'success' && "Volume "}
+                  {comp.centerOfMass?.status !== 'success' && "Position "}
+                  {comp.topology?.status !== 'success' && "Topology"}
+                </div>
               )}
-              <span>Volume Match: {comp.volume.score}%</span>
-            </div>
-            
-            <div className="flex items-center gap-2">
-              {comp.centerOfMass.status === "success" ? (
-                <CheckCircle className="text-green-600" size={16} />
-              ) : (
-                <XCircle className="text-red-600" size={16} />
-              )}
-              <span>Center of Mass</span>
-            </div>
-            
-            <div className="flex items-center gap-2">
-              {comp.topology.status === "success" ? (
-                <CheckCircle className="text-green-600" size={16} />
-              ) : (
-                <XCircle className="text-red-600" size={16} />
-              )}
-              <span>Topology Match</span>
             </div>
           </div>
-        )}
+          <div className={`text-sm font-medium ${overallScore >= 100 ? 'text-green-600' : 'text-[#7a1a1a]'}`}>
+            {overallScore}%
+          </div>
+        </div>
+      );
+    };
+
+    return (
+      <div key={comp.label} className="bg-[#fafafd] rounded-lg p-4 mb-3">
+        {!comp.isComponent ? renderComponentCount() : renderComponent()}
       </div>
     );
   }
@@ -1015,7 +874,7 @@ export default function BeginnerExercise() {
           className="fixed inset-0 z-50 flex items-center justify-center"
           style={{
             background: "rgba(245, 245, 250, 0.85)",
-            backdropFilter: "blur(2px)",
+            backdropFilter: "blur(2px)"
           }}
         >
           {isManualValidationExercise() ? (
@@ -1099,44 +958,58 @@ export default function BeginnerExercise() {
               </div>
             </div>
           ) : (
-            <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-lg relative animate-fade-in">
-              <button
-                className="absolute top-4 right-4 text-[#5c0000] hover:text-[#7a1a1a] text-xl font-bold"
-                onClick={() => setResultOpen(false)}
-                aria-label="Close"
+            <div 
+              className="bg-white rounded-xl shadow-lg w-full relative animate-fade-in flex flex-col m-4" 
+              style={{ 
+                maxHeight: 'calc(100vh - 2rem)',
+                maxWidth: '28rem'
+              }}
+            >
+              <div className="flex-none p-4 border-b border-gray-100">
+                <button
+                  className="absolute top-3 right-3 text-[#5c0000] hover:text-[#7a1a1a] text-lg font-bold"
+                  onClick={() => setResultOpen(false)}
+                  aria-label="Close"
               >
                 ×
               </button>
-              <h2 className="font-kanit text-2xl font-bold mb-6 text-[#5c0000] text-center">
+              <h2 className="font-kanit text-xl font-bold text-[#5c0000] text-center mb-0">
                 Submission Results
               </h2>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto p-4">
               {resultLoading ? (
-                <div className="flex flex-col items-center gap-2 py-8">
-                  <Loader2 className="animate-spin text-[#5c0000]" size={32} />
-                  <span className="text-[#5c0000] font-semibold">Checking your answers...</span>
+                <div className="flex flex-col items-center gap-3 py-12">
+                  <Loader2 className="animate-spin text-[#5c0000]" size={40} />
+                  <span className="text-[#5c0000] font-semibold text-lg">Checking your answers...</span>
                 </div>
               ) : resultData?.error ? (
-                <div className="text-red-600 text-center">{resultData.error}</div>
+                <div className="text-red-600 text-center p-6 text-lg">{resultData.error}</div>
               ) : (
                 <>
                   {/* QCM Results */}
-                  <div className="mb-6">
-                    <h3 className="font-semibold text-[#5c0000] mb-3">QCM Correction</h3>
-                    {resultData.qcmResults.map((q, idx) => (
-                      <div key={idx} className="flex items-center gap-2 mb-2">
-                        {q.isCorrect ? (
-                          <CheckCircle className="text-green-600" size={22} />
-                        ) : (
-                          <XCircle className="text-red-600" size={22} />
-                        )}
-                        <span className="text-base">{q.question}</span>
-                      </div>
-                    ))}
+                  <div className="mb-8 space-y-4">
+                    <h3 className="font-semibold text-[#5c0000] text-xl pb-2 border-b border-gray-200">
+                      QCM Correction
+                    </h3>
+                    <div className="space-y-3 px-2">
+                      {resultData.qcmResults.map((q, idx) => (
+                        <div key={idx} className="flex items-start gap-3 p-2 bg-gray-50 rounded-lg">
+                          {q.isCorrect ? (
+                            <CheckCircle className="text-green-600 mt-0.5 flex-shrink-0" size={24} />
+                          ) : (
+                            <XCircle className="text-red-600 mt-0.5 flex-shrink-0" size={24} />
+                          )}
+                          <span className="text-base leading-relaxed">{q.question}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
 
                   {/* CAD / DXF Results */}
-                  <div className="mb-6">
-                    <h3 className="font-semibold text-[#5c0000] mb-3">
+                  <div className="mb-8 space-y-4">
+                    <h3 className="font-semibold text-[#5c0000] text-xl pb-2 border-b border-gray-200">
                       {requiredFileType === ".dxf"
                         ? "DXF Entity Validation"
                         : requiredFileType === ".sldasm"
@@ -1144,78 +1017,38 @@ export default function BeginnerExercise() {
                         : "CAD Model Validation"}
                     </h3>
 
-                    {(() => {
-                      // Handle assembly validation results
-                      if (requiredFileType === ".sldasm" && resultData.cadResults[0]?.type === "component") {
-                        return (
-                          <div className="space-y-4">
-                            {resultData.cadResults.map((result, idx) => (
-                              <div key={idx} className="bg-[#fafafd] rounded-lg p-4">
-                                {result.type === "component_count" ? (
-                                  <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                      {result.status === "success" ? (
-                                        <CheckCircle className="text-green-600" size={20} />
-                                      ) : (
-                                        <XCircle className="text-red-600" size={20} />
-                                      )}
-                                      <span className="font-medium">{result.label}</span>
-                                    </div>
-                                    <span className="text-sm">
-                                      {result.actual} / {result.expected}
-                                    </span>
-                                  </div>
-                                ) : (
-                                  <div className="space-y-3">
-                                    <div className="flex items-center gap-2">
-                                      {result.checks.volume.ok && result.checks.centerOfMass.ok && result.checks.topology.ok ? (
-                                        <CheckCircle className="text-green-600" size={20} />
-                                      ) : (
-                                        <XCircle className="text-red-600" size={20} />
-                                      )}
-                                      <span className="font-medium">{result.label}</span>
-                                    </div>
-                                    <div className="pl-6 space-y-2 text-sm">
-                                      <div className="flex items-center gap-2">
-                                        {result.checks.volume.ok ? (
-                                          <CheckCircle className="text-green-600" size={16} />
-                                        ) : (
-                                          <XCircle className="text-red-600" size={16} />
-                                        )}
-                                        <span>Volume Match: {result.checks.volume.score}%</span>
-                                      </div>
-                                      <div className="flex items-center gap-2">
-                                        {result.checks.centerOfMass.ok ? (
-                                          <CheckCircle className="text-green-600" size={16} />
-                                        ) : (
-                                          <XCircle className="text-red-600" size={16} />
-                                        )}
-                                        <span>Center of Mass Match</span>
-                                      </div>
-                                      <div className="flex items-center gap-2">
-                                        {result.checks.topology.ok ? (
-                                          <CheckCircle className="text-green-600" size={16} />
-                                        ) : (
-                                          <XCircle className="text-red-600" size={16} />
-                                        )}
-                                        <span>Topology Match</span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
+                    {resultData.cadResults[0]?.isComponent ? (
+                      <div>
+                        {/* Résumé global pour les grands assemblages */}
+                        {resultData.cadResults.length > 5 && (
+                          <div className="mb-4 bg-gray-50 p-4 rounded-lg">
+                            <div className="flex justify-between items-center mb-2">
+                              <span className="font-semibold">Vue d'ensemble</span>
+                              <span className="text-sm text-gray-600">{resultData.cadResults.length} pièces au total</span>
+                            </div>
+                            <div className="flex gap-4 text-sm">
+                              <div className="flex items-center gap-2">
+                                <CheckCircle className="text-green-600" size={16} />
+                                <span>{resultData.cadResults.filter(c => c.allPassed).length} réussies</span>
                               </div>
-                            ))}
+                              <div className="flex items-center gap-2">
+                                <XCircle className="text-red-600" size={16} />
+                                <span>{resultData.cadResults.filter(c => !c.allPassed).length} à corriger</span>
+                              </div>
+                            </div>
                           </div>
-                        );
-                      }
-                      
-                      // Handle DXF validation
-                      if (requiredFileType === ".dxf") {
+                        )}
+                        {/* Liste des composants avec affichage compact */}
+                        <div className="divide-y divide-gray-100">
+                          {resultData.cadResults.map(comp => renderAssemblyComponent(comp))}
+                        </div>
+                      </div>
+                    ) : requiredFileType === ".dxf" ? (
                       <>
-                        <div className="mb-3 text-sm text-[#303033]">
+                        <div className="mb-4 text-base text-[#303033] bg-gray-50 p-3 rounded-lg">
                           Drawing entity check (lines, circles, text, etc.)
                         </div>
-                        <div className="mb-3">
+                        <div className="space-y-3 px-2">
                           {resultData.cadResults
                             .filter(
                               c =>
@@ -1226,17 +1059,17 @@ export default function BeginnerExercise() {
                             .map((c) => renderEntityRow(c))}
                         </div>
                         {resultData.cadProperties?.boundingBox && (
-                          <div className="text-xs text-[#303033] bg-[#fafafd] p-3 rounded-lg">
-                            <div className="font-semibold mb-1">Détails du cadre englobant</div>
-                            <pre className="text-[12px] overflow-auto">
+                          <div className="text-sm text-[#303033] bg-[#fafafd] p-4 rounded-lg mt-4">
+                            <div className="font-semibold mb-2">Détails du cadre englobant</div>
+                            <pre className="text-[13px] overflow-auto bg-white p-3 rounded border border-gray-100">
                               {JSON.stringify(resultData.cadProperties.boundingBox, null, 2)}
                             </pre>
                           </div>
                         )}
                         {resultData.cadProperties?.matchedEntities && (
-                          <div className="text-xs text-[#303033] bg-[#fafafd] p-3 rounded-lg mt-3">
-                            <div className="font-semibold mb-1">Entités correspondantes</div>
-                            <pre className="text-[12px] overflow-auto">
+                          <div className="text-sm text-[#303033] bg-[#fafafd] p-4 rounded-lg mt-4">
+                            <div className="font-semibold mb-2">Entités correspondantes</div>
+                            <pre className="text-[13px] overflow-auto bg-white p-3 rounded border border-gray-100">
                               {JSON.stringify(resultData.cadProperties.matchedEntities, null, 2)}
                             </pre>
                           </div>
@@ -1244,48 +1077,44 @@ export default function BeginnerExercise() {
                       </>
                     ) : (
                       <div className="mb-3">
-                        {resultData.cadResults.map((c) => (
-                          <div key={c.label} className="flex items-center gap-2 mb-2">
-                            {c.status === "success" ? (
-                              <CheckCircle className="text-green-600" size={22} />
-                            ) : c.status === "fail" ? (
-                              <XCircle className="text-red-600" size={22} />
-                            ) : (
-                              <span className="text-[#b0b3c6] flex items-center">
-                                <Loader2 className="animate-spin mr-1" size={18} />
-                                <span>En attente...</span>
-                              </span>
-                            )}
-                            <span className="text-base">{c.label}</span>
-                          </div>
-                        ))}
+                        {resultData.cadResults.map(comp => renderAssemblyComponent(comp))}
                       </div>
                     )}
                   </div>
 
-                  {/* Score */}
-                  <div className="mb-6 text-center">
-                    <span className="font-bold text-xl text-[#5c0000]">
-                      Score:{" "}
-                      {resultData.score !== null && typeof resultData.score !== "undefined"
-                        ? `${resultData.score}/100`
-                        : "N/A"}
-                    </span>
-                    <div className="text-base mt-2 text-[#303033]">
-                      {typeof resultData.score === "number" && resultData.score >= 80
-                        ? "🎉 You have successfully completed this exercise!"
-                        : "Review the results and try again if needed."}
+                  {/* Score and Status */}
+                  <div className="mt-8 mb-8">
+                    <div className="bg-gray-50 rounded-xl p-6 text-center">
+                      <div className="font-bold text-2xl text-[#5c0000] mb-3">
+                        Score:{" "}
+                        <span className={resultData.score >= 80 ? "text-green-600" : "text-[#7a1a1a]"}>
+                          {resultData.score !== null && typeof resultData.score !== "undefined"
+                            ? `${resultData.score}/100`
+                            : "N/A"}
+                        </span>
+                      </div>
+                      <div className="text-lg mt-2 text-[#303033]">
+                        {typeof resultData.score === "number" && resultData.score >= 80 ? (
+                          <div className="text-green-600 font-semibold">
+                            🎉 Félicitations! Vous avez réussi cet exercice!
+                          </div>
+                        ) : (
+                          <div className="text-[#666]">
+                            Revoyez les résultats et réessayez si nécessaire.
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Status Message */}
+                      {resultData.statusMessage && (
+                        <div className="mt-4 text-[#5c0000] font-medium bg-white rounded-lg p-3">
+                          {resultData.statusMessage}
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  {/* Status Message */}
-                  {resultData.statusMessage && (
-                    <div className="mb-4 text-center text-[#5c0000] font-semibold">
-                      {resultData.statusMessage}
-                    </div>
-                  )}
-
-                  <div className="flex justify-center gap-6 mt-2">
+                  <div className="flex justify-center gap-4 mt-6">
                     <button
                       className="bg-[#5c0000] text-white px-8 py-2 rounded-full font-bold hover:bg-[#7a1a1a] transition"
                       onClick={() => {
@@ -1336,6 +1165,7 @@ export default function BeginnerExercise() {
                   </div>
                 </>
               )}
+              </div>
             </div>
           )}
         </div>
@@ -1343,3 +1173,5 @@ export default function BeginnerExercise() {
     </div>
   );
 }
+
+export default BeginnerExercise;

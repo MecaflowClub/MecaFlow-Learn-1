@@ -48,7 +48,9 @@ export default function Course() {
   const navigate = useNavigate();
   const { user, token, fetchWithAuth } = useAuth();
   const [courses, setCourses] = useState([]);
+  const [exercises, setExercises] = useState([]);
   const [exercisesByCourse, setExercisesByCourse] = useState({});
+  const [selectedCourseId, setSelectedCourseId] = useState(null);
   const [progress, setProgress] = useState({}); // { courseId: completedCount }
   const [completedExercises, setCompletedExercises] = useState([]);
   const [scores, setScores] = useState([]);
@@ -158,13 +160,15 @@ export default function Course() {
 
   // No need for localStorage effect anymore since we're using backend data only
 
-  // Add this sorting function before rendering
-  const sortedExercises = exercises.sort((a, b) => {
-    // Extract numbers from exercise IDs (e.g., "01", "02", etc.)
-    const aNum = parseInt(a.exercise_id);
-    const bNum = parseInt(b.exercise_id);
-    return aNum - bNum;
-  });
+  // Get exercises for selected course and sort them
+  const sortedExercises = selectedCourseId && exercisesByCourse[selectedCourseId] 
+    ? [...exercisesByCourse[selectedCourseId]].sort((a, b) => {
+        // Extract numbers from exercise IDs (e.g., "01", "02", etc.)
+        const aNum = parseInt(a.exercise_id || 0);
+        const bNum = parseInt(b.exercise_id || 0);
+        return aNum - bNum;
+      })
+    : [];
 
   return (
     <div className="min-h-screen mt-18 bg-[#e7e7f2] font-worksans flex flex-col">
@@ -183,6 +187,11 @@ export default function Course() {
 
       <div className="flex-1 w-full max-w-7xl mx-auto px-4 py-8">
         {courses.map((course) => {
+          // When rendering a course, set it as selected if none is selected yet
+          if (!selectedCourseId) {
+            setSelectedCourseId(course._id);
+          }
+          
           const exercises = (exercisesByCourse[course._id] || [])
             .filter((ex) => ex.course_id === course._id)
             .sort((a, b) => {
