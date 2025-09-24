@@ -367,9 +367,9 @@ function BeginnerExercise() {
                                assemblyData.num_components.ok &&
                                allComponentsPassed;
 
-        statusMessage = globalSuccessful
+        statusMessage = cadResult.statusMessage || (globalSuccessful
           ? "Assembly validation successful! All components match the reference."
-          : "Assembly validation failed. Please check component details.";
+          : "Assembly validation failed. Please check component details.");
         
         allowNext = globalSuccessful;
 
@@ -874,7 +874,8 @@ function BeginnerExercise() {
           className="fixed inset-0 z-50 flex items-center justify-center"
           style={{
             background: "rgba(245, 245, 250, 0.85)",
-            backdropFilter: "blur(2px)"
+            backdropFilter: "blur(2px)",
+            height: "100vh"
           }}
         >
           {isManualValidationExercise() ? (
@@ -887,17 +888,17 @@ function BeginnerExercise() {
                 ×
               </button>
               <h2 className="font-kanit text-2xl font-bold mb-6 text-[#5c0000] text-center">
-                Submission Received
+                Manual Review Required
               </h2>
               <div className="flex flex-col items-center gap-4 py-6">
                 <CheckCircle className="text-[#5c0000]" size={48} />
                 <span className="text-lg font-semibold text-[#5c0000] text-center">
-                  Your work has been submitted for manual review.
+                  Your work has been submitted for manual review
                 </span>
                 <span className="text-base text-[#303033] text-center">
                   An instructor will review your submission and update your score soon.<br />
                   <span className="font-bold text-[#5c0000]">
-                    You can continue to the next exercise now!
+                    Feel free to continue with the next exercise!
                   </span>
                 </span>
               </div>
@@ -959,10 +960,11 @@ function BeginnerExercise() {
             </div>
           ) : (
             <div 
-              className="bg-white rounded-xl shadow-lg w-full relative animate-fade-in flex flex-col m-4" 
+              className="bg-white rounded-xl shadow-lg w-full relative animate-fade-in flex flex-col mx-auto" 
               style={{ 
                 maxHeight: 'calc(100vh - 2rem)',
-                maxWidth: '28rem'
+                maxWidth: '32rem',
+                margin: '1rem'
               }}
             >
               <div className="flex-none p-4 border-b border-gray-100">
@@ -1019,21 +1021,21 @@ function BeginnerExercise() {
 
                     {resultData.cadResults[0]?.isComponent ? (
                       <div>
-                        {/* Résumé global pour les grands assemblages */}
+                        {/* Global summary for large assemblies */}
                         {resultData.cadResults.length > 5 && (
                           <div className="mb-4 bg-gray-50 p-4 rounded-lg">
                             <div className="flex justify-between items-center mb-2">
-                              <span className="font-semibold">Vue d'ensemble</span>
-                              <span className="text-sm text-gray-600">{resultData.cadResults.length} pièces au total</span>
+                              <span className="font-semibold">Overview</span>
+                              <span className="text-sm text-gray-600">{resultData.cadResults.length} total components</span>
                             </div>
                             <div className="flex gap-4 text-sm">
                               <div className="flex items-center gap-2">
                                 <CheckCircle className="text-green-600" size={16} />
-                                <span>{resultData.cadResults.filter(c => c.allPassed).length} réussies</span>
+                                <span>{resultData.cadResults.filter(c => c.allPassed).length} passed</span>
                               </div>
                               <div className="flex items-center gap-2">
                                 <XCircle className="text-red-600" size={16} />
-                                <span>{resultData.cadResults.filter(c => !c.allPassed).length} à corriger</span>
+                                <span>{resultData.cadResults.filter(c => !c.allPassed).length} need review</span>
                               </div>
                             </div>
                           </div>
@@ -1068,7 +1070,7 @@ function BeginnerExercise() {
                         )}
                         {resultData.cadProperties?.matchedEntities && (
                           <div className="text-sm text-[#303033] bg-[#fafafd] p-4 rounded-lg mt-4">
-                            <div className="font-semibold mb-2">Entités correspondantes</div>
+                            <div className="font-semibold mb-2">Matched Entities</div>
                             <pre className="text-[13px] overflow-auto bg-white p-3 rounded border border-gray-100">
                               {JSON.stringify(resultData.cadProperties.matchedEntities, null, 2)}
                             </pre>
@@ -1085,22 +1087,22 @@ function BeginnerExercise() {
                   {/* Score and Status */}
                   <div className="mt-8 mb-8">
                     <div className="bg-gray-50 rounded-xl p-6 text-center">
-                      <div className="font-bold text-2xl text-[#5c0000] mb-3">
+                      <div className="font-bold text-2xl text-[#5c0000] mb-4">
                         Score:{" "}
                         <span className={resultData.score >= 80 ? "text-green-600" : "text-[#7a1a1a]"}>
                           {resultData.score !== null && typeof resultData.score !== "undefined"
                             ? `${resultData.score}/100`
-                            : "N/A"}
+                            : "Not Available"}
                         </span>
                       </div>
                       <div className="text-lg mt-2 text-[#303033]">
                         {typeof resultData.score === "number" && resultData.score >= 80 ? (
                           <div className="text-green-600 font-semibold">
-                            🎉 Félicitations! Vous avez réussi cet exercice!
+                            {resultData.successMessage || "You have successfully completed this exercise!"}
                           </div>
                         ) : (
                           <div className="text-[#666]">
-                            Revoyez les résultats et réessayez si nécessaire.
+                            {resultData.failureMessage || "Review the results and try again if needed."}
                           </div>
                         )}
                       </div>
