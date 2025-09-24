@@ -17,7 +17,7 @@ import { useAuth } from "../components/AuthContext";
  * - Compares counts against expected counts if provided (from backend or exercise.dxf_requirements).
  * - Shows a DXF-specific status message and allows progression when appropriate.
  *
- * Replace your existing BeginnerExercise component with this file.
+ * Replace your existing BeginnerExercise component with this file
  */
 function BeginnerExercise() {
   const { id } = useParams();
